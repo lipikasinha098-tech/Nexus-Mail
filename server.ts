@@ -2,87 +2,36 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 
-const getPassword = (email: string) => `${email}-NexusSecret!#42`;
-
-const getMailTmToken = async (email: string) => {
-  const password = getPassword(email);
-  const response = await fetch("https://api.mail.tm/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ address: email, password })
-  });
-  if (!response.ok) {
-    if (response.status === 401 || response.status === 422) {
-      // try to create account
-      const createRes = await fetch("https://api.mail.tm/accounts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address: email, password })
-      });
-      if (createRes.ok) {
-        // try token again
-        const retryRes = await fetch("https://api.mail.tm/token", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ address: email, password })
-        });
-        if (retryRes.ok) {
-          const data = await retryRes.json();
-          return data.token;
-        }
-      } else {
-        const errText = await createRes.text();
-        console.error("Account creation failed during token fetch:", createRes.status, errText);
-      }
-    }
-    throw new Error("Failed to get token");
-  }
-  const data = await response.json();
-  return data.token;
-};
-
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
 
+  // temp-mail.io API Proxy
   app.get("/api/domains", async (req, res) => {
     try {
-      const response = await fetch("https://api.mail.tm/domains");
+      const response = await fetch("https://api.internal.temp-mail.io/api/v3/domains");
       if (!response.ok) throw new Error("API error");
       const data = await response.json();
-      res.json(data['hydra:member'].map((d: any) => d.domain));
+      res.json(data.domains.map((d: any) => d.name));
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to fetch domains" });
     }
   });
 
-  app.get("/api/generate", async (req, res) => {
+  app.post("/api/generate", async (req, res) => {
     try {
-      const dRes = await fetch("https://api.mail.tm/domains");
-      if (!dRes.ok) throw new Error("Failed to fetch domains");
-      const dData = await dRes.json();
-      const domain = dData['hydra:member'][0].domain;
-      
-      const randomString = Math.random().toString(36).substring(2, 10);
-      const email = `nexus-${randomString}@${domain}`;
-      
-      const password = getPassword(email);
-      const createRes = await fetch("https://api.mail.tm/accounts", {
+      const { name, domain } = req.body;
+      const response = await fetch("https://api.internal.temp-mail.io/api/v3/email/new", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address: email, password })
+        body: JSON.stringify({ name, domain })
       });
-      
-      if (!createRes.ok) {
-        const errText = await createRes.text();
-        console.error("Account creation failed:", createRes.status, errText);
-        throw new Error("Failed to create account");
-      }
-      
-      res.json([email]); // array format to match frontend expectation
+      if (!response.ok) throw new Error("API error");
+      const data = await response.json();
+      res.json([data.email]); // returning array for compatibility
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to generate mailbox" });
@@ -90,24 +39,19 @@ async function startServer() {
   });
 
   app.get("/api/inbox", async (req, res) => {
-    const { login, domain } = req.query;
-    if (!login || !domain) {
-      return res.status(400).json({ error: "Missing login or domain" });
-    }
-    const email = `${login}@${domain}`;
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ error: "Missing email" });
+    
     try {
-      const token = await getMailTmToken(email);
-      const mRes = await fetch("https://api.mail.tm/messages", {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!mRes.ok) throw new Error("Failed to fetch messages");
-      const mData = await mRes.json();
+      const response = await fetch(`https://api.internal.temp-mail.io/api/v3/email/${email}/messages`);
+      if (!response.ok) throw new Error("API error");
+      const data = await response.json();
       
-      const formatted = mData['hydra:member'].map((m: any) => ({
+      const formatted = data.map((m: any) => ({
         id: m.id,
-        from: m.from.address,
+        from: m.from,
         subject: m.subject,
-        date: m.createdAt
+        date: m.created_at
       }));
       
       res.json(formatted);
@@ -118,32 +62,27 @@ async function startServer() {
   });
 
   app.get("/api/message", async (req, res) => {
-    const { login, domain, id } = req.query;
-    if (!login || !domain || !id) {
-      return res.status(400).json({ error: "Missing parameters" });
-    }
-    const email = `${login}@${domain}`;
+    const { email, id } = req.query;
+    if (!email || !id) return res.status(400).json({ error: "Missing parameters" });
+    
     try {
-      const token = await getMailTmToken(email);
-      const mRes = await fetch(`https://api.mail.tm/messages/${id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!mRes.ok) throw new Error("Failed to fetch message");
-      const mData = await mRes.json();
+      const response = await fetch(`https://api.internal.temp-mail.io/api/v3/message/${id}`);
+      if (!response.ok) throw new Error("API error");
+      const mData = await response.json();
       
       const formatted = {
         id: mData.id,
-        from: mData.from.address,
+        from: mData.from,
         subject: mData.subject,
-        date: mData.createdAt,
-        attachments: mData.hasAttachments ? (mData.attachments || []).map((a: any) => ({
-          filename: a.filename,
-          contentType: a.contentType,
+        date: mData.created_at,
+        attachments: mData.attachments ? mData.attachments.map((a: any) => ({
+          filename: a.name,
+          contentType: a.mime_type,
           size: a.size
         })) : [],
-        body: mData.text || "",
-        textBody: mData.text || "",
-        htmlBody: mData.html || (mData.text ? `<pre>${mData.text}</pre>` : "")
+        body: mData.body_text || mData.body_html || "",
+        textBody: mData.body_text || "",
+        htmlBody: mData.body_html || (mData.body_text ? `<pre>${mData.body_text}</pre>` : "")
       };
       
       res.json(formatted);
@@ -153,7 +92,6 @@ async function startServer() {
     }
   });
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -161,10 +99,10 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
+    const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 

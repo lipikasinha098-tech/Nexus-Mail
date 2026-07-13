@@ -4,6 +4,7 @@ import { Mail, Copy, RefreshCw, LogIn, Trash2, Sparkles, Plus, Clock } from 'luc
 import { Starfield } from './components/Starfield';
 import { MessageViewer } from './components/MessageViewer';
 import { EmailMessage, DetailedMessage } from './types';
+import { getDomains, generateEmail, getInbox, getMessage } from './lib/mail';
 
 export default function App() {
   const [currentEmail, setCurrentEmail] = useState<string | null>(null);
@@ -12,21 +13,30 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [loginInput, setLoginInput] = useState('');
+  const [selectedDomain, setSelectedDomain] = useState('');
+  const [domains, setDomains] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
   
+  // Fetch available domains
+  useEffect(() => {
+    getDomains()
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setDomains(data);
+          setSelectedDomain(data[0]);
+        }
+      })
+      .catch(console.error);
+  }, []);
+
   const handleGenerate = async () => {
     setIsGenerating(true);
     try {
-      const res = await fetch('/api/generate');
-      if (!res.ok) throw new Error("Failed to generate email");
-      const data = await res.json();
-      if (data && data.length > 0) {
-        const newEmail = data[0];
-        setCurrentEmail(newEmail);
-        localStorage.setItem('nexus_current_email', newEmail);
-        setInbox([]);
-        setSelectedMessage(null);
-      }
+      const newEmail = await generateEmail();
+      setCurrentEmail(newEmail);
+      localStorage.setItem('nexus_current_email', newEmail);
+      setInbox([]);
+      setSelectedMessage(null);
     } catch (err) {
       console.error('Failed to generate email', err);
       alert('Failed to generate new email. Please try again.');
@@ -38,10 +48,10 @@ export default function App() {
   // Load saved email on mount
   useEffect(() => {
     const saved = localStorage.getItem('nexus_current_email');
-    if (saved && saved.includes('@') && saved.includes('web-library.net')) {
+    if (saved && saved.includes('@')) {
       setCurrentEmail(saved);
     } else {
-      // Auto-generate on first visit or if invalid domain
+      // Auto-generate on first visit
       handleGenerate();
     }
   }, []);
@@ -57,9 +67,10 @@ export default function App() {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginInput || !loginInput.includes('@')) return;
-    setCurrentEmail(loginInput);
-    localStorage.setItem('nexus_current_email', loginInput);
+    if (!loginInput) return;
+    const email = `${loginInput}@${selectedDomain || domains[0]}`;
+    setCurrentEmail(email);
+    localStorage.setItem('nexus_current_email', email);
     setInbox([]);
     setSelectedMessage(null);
     setLoginInput('');
@@ -74,34 +85,23 @@ export default function App() {
 
   const fetchInbox = async () => {
     if (!currentEmail) return;
-    const [login, domain] = currentEmail.split('@');
     try {
-      const res = await fetch(`/api/inbox?login=${login}&domain=${domain}`);
-      if (!res.ok) {
-        if (res.status === 500) {
-           handleLogout();
-           alert("Invalid or expired email address.");
-           return;
-        }
-        throw new Error("Failed to fetch");
-      }
-      const data = await res.json();
+      const data = await getInbox(currentEmail);
       if (Array.isArray(data)) {
         setInbox(data);
       }
     } catch (err) {
       console.error('Failed to fetch inbox', err);
+      handleLogout();
+      alert("Invalid or expired email address.");
     }
   };
 
   const openMessage = async (msg: EmailMessage) => {
     if (!currentEmail) return;
     setIsLoading(true);
-    const [login, domain] = currentEmail.split('@');
     try {
-      const res = await fetch(`/api/message?login=${login}&domain=${domain}&id=${msg.id}`);
-      if (!res.ok) throw new Error("Failed to fetch message");
-      const data = await res.json();
+      const data = await getMessage(currentEmail, msg.id);
       setSelectedMessage(data);
     } catch (err) {
       console.error('Failed to fetch message', err);
@@ -179,18 +179,31 @@ export default function App() {
               </div>
               
               <form onSubmit={handleLogin} className="flex gap-2">
-                <input 
-                  id="login-input"
-                  type="email" 
-                  required
-                  placeholder="user@web-library.net"
-                  value={loginInput}
-                  onChange={(e) => setLoginInput(e.target.value)}
-                  className="flex-1 bg-black border border-slate-700 rounded-xl px-4 py-3 text-cyan-400 font-mono placeholder-slate-600 focus:outline-none focus:border-cyan-500 transition-colors"
-                />
+                <div className="flex flex-1 rounded-xl overflow-hidden border border-slate-700 bg-black focus-within:border-cyan-500 transition-colors">
+                  <input 
+                    id="login-input"
+                    type="text" 
+                    required
+                    placeholder="username"
+                    value={loginInput}
+                    onChange={(e) => setLoginInput(e.target.value.replace(/[^a-zA-Z0-9_.-]/g, ''))}
+                    className="flex-1 bg-transparent px-4 py-3 text-cyan-400 font-mono placeholder-slate-600 focus:outline-none"
+                  />
+                  <div className="flex items-center px-3 bg-slate-900 border-l border-slate-700 text-slate-400 font-mono text-sm select-none">
+                    @
+                    <select 
+                      value={selectedDomain}
+                      onChange={(e) => setSelectedDomain(e.target.value)}
+                      className="bg-transparent outline-none appearance-none cursor-pointer hover:text-white transition-colors ml-1"
+                    >
+                      {domains.map(d => <option key={d} value={d} className="bg-slate-900 text-sm">{d}</option>)}
+                      {domains.length === 0 && <option value="" className="bg-slate-900 text-sm">Loading domains...</option>}
+                    </select>
+                  </div>
+                </div>
                 <button 
                   type="submit"
-                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-6 py-3 rounded-xl font-medium transition-colors flex items-center gap-2"
+                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-6 py-3 rounded-xl font-medium transition-colors flex items-center gap-2 shrink-0"
                 >
                   <LogIn className="w-5 h-5" />
                 </button>
