@@ -1,10 +1,45 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Mail, Copy, RefreshCw, LogIn, Trash2, Sparkles, Plus, Clock } from 'lucide-react';
+import { Mail, Copy, RefreshCw, LogIn, Plus } from 'lucide-react';
 import { Starfield } from './components/Starfield';
 import { MessageViewer } from './components/MessageViewer';
 import { EmailMessage, DetailedMessage } from './types';
-import { getDomains, generateEmail, getInbox, getMessage } from './lib/mail';
+import { getDomains, generateEmail, getInbox, getMessage, loginEmail } from './lib/mail';
+
+const playActionSound = () => {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    osc.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(440, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.1);
+    gainNode.gain.setValueAtTime(0.05, ctx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.1);
+  } catch (e) {}
+};
+
+const playNewMailSound = () => {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    osc.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.setValueAtTime(1318.51, ctx.currentTime + 0.1); // E6
+    gainNode.gain.setValueAtTime(0, ctx.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.05);
+    gainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.3);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.3);
+  } catch (e) {}
+};
 
 export default function App() {
   const [currentEmail, setCurrentEmail] = useState<string | null>(null);
@@ -16,6 +51,8 @@ export default function App() {
   const [selectedDomain, setSelectedDomain] = useState('');
   const [domains, setDomains] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
+  
+  const previousInboxLength = useRef(0);
   
   // Fetch available domains
   useEffect(() => {
@@ -32,10 +69,12 @@ export default function App() {
   const handleGenerate = async () => {
     setIsGenerating(true);
     try {
+      playActionSound();
       const newEmail = await generateEmail();
       setCurrentEmail(newEmail);
       localStorage.setItem('nexus_current_email', newEmail);
       setInbox([]);
+      previousInboxLength.current = 0;
       setSelectedMessage(null);
     } catch (err) {
       console.error('Failed to generate email', err);
@@ -56,30 +95,39 @@ export default function App() {
     }
   }, []);
 
-  // Poll inbox every 5 seconds if an email is active
+  // Poll inbox every 10 seconds if an email is active (Guerrilla Mail API is rate limited)
   useEffect(() => {
     if (!currentEmail) return;
     
     fetchInbox();
-    const interval = setInterval(fetchInbox, 5000);
+    const interval = setInterval(fetchInbox, 10000);
     return () => clearInterval(interval);
   }, [currentEmail]);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginInput) return;
-    const email = `${loginInput}@${selectedDomain || domains[0]}`;
-    setCurrentEmail(email);
-    localStorage.setItem('nexus_current_email', email);
-    setInbox([]);
-    setSelectedMessage(null);
-    setLoginInput('');
+    try {
+      playActionSound();
+      const email = await loginEmail(loginInput, selectedDomain || domains[0]);
+      setCurrentEmail(email);
+      localStorage.setItem('nexus_current_email', email);
+      setInbox([]);
+      previousInboxLength.current = 0;
+      setSelectedMessage(null);
+      setLoginInput('');
+    } catch (err) {
+      console.error('Failed to login', err);
+      alert('Failed to login.');
+    }
   };
 
   const handleLogout = () => {
+    playActionSound();
     setCurrentEmail(null);
     localStorage.removeItem('nexus_current_email');
     setInbox([]);
+    previousInboxLength.current = 0;
     setSelectedMessage(null);
   };
 
@@ -89,16 +137,23 @@ export default function App() {
       const data = await getInbox(currentEmail);
       if (Array.isArray(data)) {
         setInbox(data);
+        if (data.length > previousInboxLength.current) {
+          if (previousInboxLength.current > 0) {
+            playNewMailSound();
+          }
+          previousInboxLength.current = data.length;
+        }
       }
     } catch (err) {
       console.error('Failed to fetch inbox', err);
       handleLogout();
-      alert("Invalid or expired email address.");
+      alert("Session expired or invalid email address.");
     }
   };
 
   const openMessage = async (msg: EmailMessage) => {
     if (!currentEmail) return;
+    playActionSound();
     setIsLoading(true);
     try {
       const data = await getMessage(currentEmail, msg.id);
