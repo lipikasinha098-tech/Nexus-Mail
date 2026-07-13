@@ -30,6 +30,9 @@ const getMailTmToken = async (email: string) => {
           const data = await retryRes.json();
           return data.token;
         }
+      } else {
+        const errText = await createRes.text();
+        console.error("Account creation failed during token fetch:", createRes.status, errText);
       }
     }
     throw new Error("Failed to get token");
@@ -73,7 +76,11 @@ async function startServer() {
         body: JSON.stringify({ address: email, password })
       });
       
-      if (!createRes.ok) throw new Error("Failed to create account");
+      if (!createRes.ok) {
+        const errText = await createRes.text();
+        console.error("Account creation failed:", createRes.status, errText);
+        throw new Error("Failed to create account");
+      }
       
       res.json([email]); // array format to match frontend expectation
     } catch (error) {

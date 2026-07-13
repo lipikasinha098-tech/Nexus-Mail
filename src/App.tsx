@@ -18,6 +18,7 @@ export default function App() {
     setIsGenerating(true);
     try {
       const res = await fetch('/api/generate');
+      if (!res.ok) throw new Error("Failed to generate email");
       const data = await res.json();
       if (data && data.length > 0) {
         const newEmail = data[0];
@@ -28,6 +29,7 @@ export default function App() {
       }
     } catch (err) {
       console.error('Failed to generate email', err);
+      alert('Failed to generate new email. Please try again.');
     } finally {
       setIsGenerating(false);
     }
@@ -36,10 +38,10 @@ export default function App() {
   // Load saved email on mount
   useEffect(() => {
     const saved = localStorage.getItem('nexus_current_email');
-    if (saved) {
+    if (saved && saved.includes('@') && saved.includes('web-library.net')) {
       setCurrentEmail(saved);
     } else {
-      // Auto-generate on first visit
+      // Auto-generate on first visit or if invalid domain
       handleGenerate();
     }
   }, []);
@@ -75,6 +77,14 @@ export default function App() {
     const [login, domain] = currentEmail.split('@');
     try {
       const res = await fetch(`/api/inbox?login=${login}&domain=${domain}`);
+      if (!res.ok) {
+        if (res.status === 500) {
+           handleLogout();
+           alert("Invalid or expired email address.");
+           return;
+        }
+        throw new Error("Failed to fetch");
+      }
       const data = await res.json();
       if (Array.isArray(data)) {
         setInbox(data);
@@ -90,10 +100,12 @@ export default function App() {
     const [login, domain] = currentEmail.split('@');
     try {
       const res = await fetch(`/api/message?login=${login}&domain=${domain}&id=${msg.id}`);
+      if (!res.ok) throw new Error("Failed to fetch message");
       const data = await res.json();
       setSelectedMessage(data);
     } catch (err) {
       console.error('Failed to fetch message', err);
+      alert('Failed to load message.');
     } finally {
       setIsLoading(false);
     }
@@ -171,7 +183,7 @@ export default function App() {
                   id="login-input"
                   type="email" 
                   required
-                  placeholder="user@1secmail.com"
+                  placeholder="user@web-library.net"
                   value={loginInput}
                   onChange={(e) => setLoginInput(e.target.value)}
                   className="flex-1 bg-black border border-slate-700 rounded-xl px-4 py-3 text-cyan-400 font-mono placeholder-slate-600 focus:outline-none focus:border-cyan-500 transition-colors"
