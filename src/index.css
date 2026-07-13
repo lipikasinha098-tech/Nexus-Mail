@@ -1,0 +1,37 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  
+  --color-nexus-900: #0a0a14;
+  --color-nexus-800: #121222;
+  --color-nexus-700: #1a1a33;
+  --color-nexus-accent: #6b46c1;
+  --color-nexus-glow: #9f7aea;
+
+  --animate-spin-slow: spin 3s linear infinite;
+}
+
+body {
+  @apply bg-nexus-900 text-white font-sans antialiased selection:bg-nexus-accent selection:text-white;
+}
+
+/* Custom scrollbar for webkit */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-nexus-900;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-nexus-700 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-nexus-accent;
+}

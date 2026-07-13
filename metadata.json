@@ -1,0 +1,6 @@
+{
+  "name": "Nexus",
+  "description": "Cosmic temp mail service with unlimited, instantly available addresses and a dark mode interface.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
